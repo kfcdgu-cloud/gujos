@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: sans-serif; margin: 20px; scroll-behavior: smooth; }
+        
+        /* เมนูข้าง ใช้ GPU ลื่นไม่กระตุก */
+        .sidebar {
+            height: 100%; width: 220px; position: fixed; top: 0; left: 0;
+            background: #1a1a1a; padding-top: 50px;
+            transform: translateX(-100%); transition: transform 0.2s;
+        }
+        .sidebar.active { transform: translateX(0); }
+        .sidebar a { display: block; color: #fff; padding: 12px 20px; text-decoration: none; }
+        .sidebar a:hover { background: #333; }
+        
+        /* โหมดกาก: ปิดอนิเมชัน/เงา ทั้งหมดเพื่อลดภาระเครื่อง */
+        body.low * { transition: none !important; box-shadow: none !important; scroll-behavior: auto !important; }
+        body.low img { image-rendering: pixelated; }
+
+        .card { padding: 15px; margin: 15px 0; background: #f0f0f0; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.15); }
+    </style>
+</head>
+<body>
+
+    <button onclick="toggleMenu()">☰ เปิดเมนู</button>
+    <button onclick="toggleLow()">โหมดกาก (แก้แลค)</button>
+
+    <div id="sidebar" class="sidebar">
+        <a href="#sec1" onclick="toggleMenu()">1. หน้าแรก</a>
+        <a href="#sec2" onclick="toggleMenu()">2. เกี่ยวกับเรา</a>
+        <a href="#sec3" onclick="toggleMenu()">3. บริการของเรา</a>
+        <a href="#sec4" onclick="toggleMenu()">4. ติดต่อเรา</a>
+    </div>
+
+    <div id="sec1" class="card">
+        <h2>1. หน้าแรก</h2>
+        <p>ยินดีต้อนรับเข้าสู่เว็บไซต์</p>
+    </div>
+
+    <div id="sec2" class="card">
+        <h2>2. เกี่ยวกับเรา</h2>
+        <p>รายละเอียดและข้อมูลเกี่ยวกับเรา</p>
+    </div>
+
+    <div id="sec3" class="card">
+        <h2>3. บริการของเรา</h2>
+        <p>รายการบริการทั้งหมดที่มีให้เลือกใช้</p>
+    </div>
+
+    <div id="sec4" class="card">
+        <h2>4. ติดต่อเรา</h2>
+        <p>ช่องทางการติดต่อและที่อยู่</p>
+    </div>
+
+    <script>
+        // เปิด-ปิด เมนู
+        const toggleMenu = () => requestAnimationFrame(() => 
+            document.getElementById('sidebar').classList.toggle('active')
+        );
+        // เปิด-ปิด โหมดกากแก้แลค
+        const toggleLow = () => document.body.classList.toggle('low');
+    </script>
+</body>
+</html>
