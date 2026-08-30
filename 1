@@ -1,0 +1,415 @@
+local player = game.Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+local runService = game:GetService("RunService")
+local userInputService = game:GetService("UserInputService")
+local players = game:GetService("Players")
+
+-- ========================================================
+-- ตัวแปรระบบ
+-- ========================================================
+local aimbotEnabled = false
+local aimAssistEnabled = true -- เพิ่มตัวแปรสำหรับ เปิด/ปิด การดูดเป้า (CFrame Lock)
+local tracerEnabled = true -- เปิด/ปิด เส้นชี้เป้า
+local espEnabled = false
+local noclipEnabled = false
+local walkSpeedValue = 16
+local fovRadius = 100
+local currentTarget = nil
+
+local fovColors = {
+    {name = "สีทอง", color = Color3.fromRGB(255, 215, 0)},
+    {name = "สีแดง", color = Color3.fromRGB(255, 50, 50)},
+    {name = "สีเขียว", color = Color3.fromRGB(50, 255, 50)},
+    {name = "สีฟ้า", color = Color3.fromRGB(50, 150, 255)},
+    {name = "สีชมพู", color = Color3.fromRGB(255, 105, 180)}
+}
+local currentColorIndex = 1
+
+local espColors = {
+    {name = "สีแดง", color = Color3.fromRGB(255, 50, 50)},
+    {name = "สีเขียว", color = Color3.fromRGB(50, 255, 50)},
+    {name = "สีฟ้า", color = Color3.fromRGB(50, 150, 255)},
+    {name = "สีเหลือง", color = Color3.fromRGB(255, 255, 50)},
+    {name = "สีม่วง", color = Color3.fromRGB(180, 50, 255)}
+}
+local currentESPColorIndex = 1
+
+-- วงกลม & Tracer
+local fovCircle = Drawing.new("Circle")
+fovCircle.Visible = false
+fovCircle.Thickness = 1.5
+fovCircle.Color = fovColors[currentColorIndex].color
+fovCircle.Filled = false
+fovCircle.Transparency = 1
+fovCircle.Radius = fovRadius
+
+local tracerLine = Drawing.new("Line")
+tracerLine.Visible = false
+tracerLine.Thickness = 2
+tracerLine.Color = fovColors[currentColorIndex].color
+tracerLine.Transparency = 1
+
+local function getTargetInFOV()
+    local target = nil
+    local shortestDistance = fovRadius
+    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+
+    for _, p in ipairs(players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                local pos, onScreen = camera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
+                if onScreen then
+                    local distance = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude
+                    if distance <= fovRadius and distance < shortestDistance then
+                        target = p.Character.HumanoidRootPart
+                        shortestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+-- ลูปทำงาน Noclip
+runService.Stepped:Connect(function()
+    if noclipEnabled and player.Character then
+        for _, part in ipairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- ลูปทำงาน Renderหลัก (Aimbot & Visuals)
+runService.RenderStepped:Connect(function()
+    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    local selectedColor = fovColors[currentColorIndex].color
+
+    if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+        player.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = walkSpeedValue
+    end
+
+    fovCircle.Position = screenCenter
+    fovCircle.Radius = fovRadius
+    fovCircle.Color = selectedColor
+    fovCircle.Visible = aimbotEnabled
+
+    if aimbotEnabled then
+        if currentTarget then
+            local hum = currentTarget.Parent:FindFirstChildOfClass("Humanoid")
+            local pos, onScreen = camera:WorldToViewportPoint(currentTarget.Position)
+            local dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude
+            if not hum or hum.Health <= 0 or not onScreen or dist > fovRadius then
+                currentTarget = nil
+            end
+        end
+
+        if not currentTarget then
+            currentTarget = getTargetInFOV()
+        end
+
+        if currentTarget then
+            local pos, onScreen = camera:WorldToViewportPoint(currentTarget.Position)
+            local dist = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude
+
+            if onScreen and dist <= fovRadius then
+                if tracerEnabled then
+                    tracerLine.From = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
+                    tracerLine.To = Vector2.new(pos.X, pos.Y)
+                    tracerLine.Color = selectedColor
+                    tracerLine.Visible = true
+                else
+                    tracerLine.Visible = false
+                end
+
+                -- ทำงานล็อก/ดูดกล้องเฉพาะเมื่อเปิด aimAssistEnabled เท่านั้น
+                if aimAssistEnabled then
+                    local targetCFrame = CFrame.new(camera.CFrame.Position, currentTarget.Position)
+                    camera.CFrame = camera.CFrame:Lerp(targetCFrame, 0.25)
+                end
+            else
+                tracerLine.Visible = false
+            end
+        else
+            tracerLine.Visible = false
+        end
+    else
+        tracerLine.Visible = false
+        currentTarget = nil
+    end
+end)
+
+-- ระบบ ESP ปรับปรุงให้รองรับ Real-time Respawns
+local function applyESPToCharacter(char)
+    if not char then return end
+    local highlight = char:FindFirstChild("ESPHighlight")
+    
+    if espEnabled then
+        if not highlight then
+            highlight = Instance.new("Highlight")
+            highlight.Name = "ESPHighlight"
+            highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+            highlight.FillTransparency = 0.4
+            highlight.OutlineTransparency = 0
+            highlight.Adornee = char
+            highlight.Parent = char
+        end
+        highlight.FillColor = espColors[currentESPColorIndex].color
+    else
+        if highlight then
+            highlight:Destroy()
+        end
+    end
+end
+
+local function updateESP()
+    for _, p in ipairs(players:GetPlayers()) do
+        if p ~= player and p.Character then
+            applyESPToCharacter(p.Character)
+        end
+    end
+end
+
+-- สตรีมจับการเกิดใหม่ของผู้เล่นอื่นเพื่ออัปเดต ESP
+players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        if espEnabled then
+            applyESPToCharacter(char)
+        end
+    end)
+end)
+
+for _, p in ipairs(players:GetPlayers()) do
+    if p ~= player then
+        p.CharacterAdded:Connect(function(char)
+            task.wait(0.5)
+            if espEnabled then
+                applyESPToCharacter(char)
+            end
+        end)
+    end
+end
+
+-- ========================================================
+-- ส่วนสร้าง UI
+-- ========================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CustomFixedGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "IYToggleBtn"
+toggleBtn.Size = UDim2.new(0, 45, 0, 45)
+toggleBtn.Position = UDim2.new(0.05, 0, 0.2, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
+toggleBtn.Text = "IY"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize = 18
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.Active = true
+toggleBtn.Draggable = true
+toggleBtn.Parent = screenGui
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(1, 0)
+btnCorner.Parent = toggleBtn
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 490) -- ขยายขนาดแนวตั้งขึ้นเล็กน้อยเพื่อให้พอดีกับปุ่มใหม่
+mainFrame.Position = UDim2.new(0.5, -150, 0.15, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.BackgroundTransparency = 0.15
+mainFrame.Visible = false
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+local draggingMenu = false
+local dragInput, dragStart, startPos
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingMenu = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                draggingMenu = false
+            end
+        end)
+    end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+userInputService.InputChanged:Connect(function(input)
+    if input == dragInput and draggingMenu then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0, 12)
+frameCorner.Parent = mainFrame
+
+local framePadding = Instance.new("UIPadding")
+framePadding.PaddingTop = UDim.new(0, 10)
+framePadding.PaddingLeft = UDim.new(0, 10)
+framePadding.PaddingRight = UDim.new(0, 10)
+framePadding.Parent = mainFrame
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 6)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout.Parent = mainFrame
+
+local authorLabel = Instance.new("TextLabel")
+authorLabel.Size = UDim2.new(1, 0, 0, 20)
+authorLabel.BackgroundTransparency = 1
+authorLabel.Text = "ผู้เขียน: ลูกแม่จร"
+authorLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+authorLabel.TextSize = 15
+authorLabel.Font = Enum.Font.SourceSansBold
+authorLabel.Parent = mainFrame
+
+local function createMenuButton(text, iconText, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    btn.BackgroundTransparency = 0.3
+    btn.Text = "  " .. iconText .. "  " .. text
+    btn.TextColor3 = Color3.fromRGB(240, 240, 240)
+    btn.TextSize = 14
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Parent = mainFrame
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = btn
+    
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+local function createNumberInput(title, defaultVal, callback)
+    local inputFrame = Instance.new("Frame")
+    inputFrame.Size = UDim2.new(1, 0, 0, 38)
+    inputFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    inputFrame.BackgroundTransparency = 0.3
+    inputFrame.Parent = mainFrame
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = inputFrame
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(0.6, 0, 1, 0)
+    titleLabel.Position = UDim2.new(0, 10, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = title
+    titleLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+    titleLabel.TextSize = 14
+    titleLabel.Font = Enum.Font.SourceSansBold
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = inputFrame
+
+    local textBox = Instance.new("TextBox")
+    textBox.Size = UDim2.new(0.35, -10, 0.7, 0)
+    textBox.Position = UDim2.new(0.65, 0, 0.15, 0)
+    textBox.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+    textBox.Text = tostring(defaultVal)
+    textBox.TextColor3 = Color3.fromRGB(255, 215, 0)
+    textBox.TextSize = 14
+    textBox.Font = Enum.Font.SourceSansBold
+    textBox.ClearTextOnFocus = false
+    textBox.Parent = inputFrame
+
+    local boxCorner = Instance.new("UICorner")
+    boxCorner.CornerRadius = UDim.new(0, 6)
+    boxCorner.Parent = textBox
+
+    textBox.FocusLost:Connect(function()
+        local num = tonumber(textBox.Text)
+        if num then
+            callback(num)
+        else
+            textBox.Text = tostring(defaultVal)
+        end
+    end)
+end
+
+-- ========================================================
+-- รายการปุ่มสั่งการ
+-- ========================================================
+
+createNumberInput("⚡ ปรับความเร็ววิ่ง:", walkSpeedValue, function(val)
+    walkSpeedValue = val
+end)
+
+createNumberInput("📐 ปรับระยะ FOV:", fovRadius, function(val)
+    fovRadius = val
+end)
+
+local aimBtn
+aimBtn = createMenuButton("ระบบล็อกเป้าคน: OFF", "🎯", function()
+    aimbotEnabled = not aimbotEnabled
+    aimBtn.Text = aimbotEnabled and "  🎯  ระบบล็อกเป้าคน: ON" or "  🎯  ระบบล็อกเป้าคน: OFF"
+end)
+
+local assistBtn
+assistBtn = createMenuButton("ระบบดูดเป้า: ON", "🧲", function()
+    aimAssistEnabled = not aimAssistEnabled
+    assistBtn.Text = aimAssistEnabled and "  🧲  ระบบดูดเป้า: ON" or "  🧲  ระบบดูดเป้า: OFF"
+end)
+
+local tracerBtn
+tracerBtn = createMenuButton("เส้นชี้เป้า (Tracer): ON", "📍", function()
+    tracerEnabled = not tracerEnabled
+    tracerBtn.Text = tracerEnabled and "  📍  เส้นชี้เป้า (Tracer): ON" or "  📍  เส้นชี้เป้า (Tracer): OFF"
+end)
+
+local colorBtn
+colorBtn = createMenuButton("สีวงกลม & เส้น: " .. fovColors[currentColorIndex].name, "🎨", function()
+    currentColorIndex = currentColorIndex + 1
+    if currentColorIndex > #fovColors then currentColorIndex = 1 end
+    colorBtn.Text = "  🎨  สีวงกลม & เส้น: " .. fovColors[currentColorIndex].name
+end)
+
+local espBtn
+espBtn = createMenuButton("ระบบมองคน (ESP): OFF", "👁️", function()
+    espEnabled = not espEnabled
+    espBtn.Text = espEnabled and "  👁️  ระบบมองคน (ESP): ON" or "  👁️  ระบบมองคน (ESP): OFF"
+    updateESP()
+end)
+
+local espColorBtn
+espColorBtn = createMenuButton("สีมองคน (ESP): " .. espColors[currentESPColorIndex].name, "🎨", function()
+    currentESPColorIndex = currentESPColorIndex + 1
+    if currentESPColorIndex > #espColors then currentESPColorIndex = 1 end
+    espColorBtn.Text = "  🎨  สีมองคน (ESP): " .. espColors[currentESPColorIndex].name
+    updateESP()
+end)
+
+local noclipBtn
+noclipBtn = createMenuButton("เดินทะลุกำแพง (Noclip): OFF", "👻", function()
+    noclipEnabled = not noclipEnabled
+    noclipBtn.Text = noclipEnabled and "  👻  เดินทะลุกำแพง (Noclip): ON" or "  👻  เดินทะลุกำแพง (Noclip): OFF"
+end)
+
+toggleBtn.MouseButton1Click:Connect(function()
+    mainFrame.Visible = not mainFrame.Visible
+end)
